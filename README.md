@@ -55,6 +55,17 @@ The SARIF report is written locally (`checkov-plan-results.sarif` by default) �
 - Installs checkov via `pip`, pinned by exact version — no Docker image, keeps the action simple.
 - Consuming repos should pin this action by commit SHA, same convention as every other action reference in this account's workflows — never a floating tag.
 
+## Architecture: this repo doesn't run anything itself
+
+This is **not** a central service that other repos call out to at runtime. It's just where the composite action's code (`action.yml`) lives. When a consuming repo references it (`uses: jalcalaroot/gha-checkov-plan-scan@<sha>`), GitHub Actions checks that code out and runs it **inside the consuming repo's own job** — its own runner, its own permissions, its own filesystem. There's one copy of the logic, but N independent executions, one per repo's own pipeline. Same model as [`gha-iam-policy-autopilot`](https://github.com/jalcalaroot/gha-iam-policy-autopilot).
+
+Net effect on a consuming repo's `terraform-plan.yml`: it goes from one Checkov pass to two —
+
+1. **Existing, unchanged**: `bridgecrewio/checkov-action` against `directory: .` (the static HCL) — blocking.
+2. **This action**: against the resolved `terraform plan` — non-blocking (see the limitation above).
+
+Nothing about Checkov's own ruleset or config changed. What changed is the *input* it gets to look at a second time — resolved values a static HCL scan structurally cannot see.
+
 ## Test
 
 `.github/workflows/test.yml` runs this action twice against a fixture in `test/` (an `aws_s3_bucket` with several checks deliberately left un-skipped so there's something real to find, plus an `aws_iam_role`, fake credentials, `skip_credentials_validation = true` — no real AWS account involved): once with the default `soft-fail: true` (must succeed despite real findings) and once with `soft-fail: false` (must fail), asserting both behave as documented.
