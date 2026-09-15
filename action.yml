@@ -1,0 +1,74 @@
+name: "Checkov Plan Scan"
+description: >
+  Scans a Terraform plan (JSON) with Checkov, enriched against the real HCL
+  source (--repo-root-for-plan-enrichment + --deep-analysis) so it resolves
+  variables/data sources/modules like a static HCL scan can't. Meant to run
+  as a SECOND, complementary Checkov pass alongside the existing static HCL
+  scan in a terraform-plan job - not a replacement for it. Defaults to
+  soft-fail: existing #checkov:skip comments are NOT reliably respected in
+  plan-scan mode even with enrichment (confirmed by hand, and a known open
+  issue upstream - bridgecrewio/checkov#2047, #5212, #1286, #7126), so
+  making this blocking by default would re-flag every already-accepted
+  exception as new. Flip soft-fail to false only after confirming by hand
+  that a given repo's findings don't just duplicate accepted skips.
+author: "jalcalaroot"
+
+inputs:
+  plan-file:
+    description: "Path to the Terraform plan in JSON format (output of `terraform show -json <planfile>`)"
+    required: true
+  repo-root:
+    description: "Directory containing the HCL source that produced the plan (passed to --repo-root-for-plan-enrichment)"
+    required: false
+    default: "."
+  checkov-version:
+    description: "Pinned checkov version to install"
+    required: false
+    default: "3.3.17"
+  soft-fail:
+    description: "When 'true' (default), report findings but don't fail the step (--soft-fail) - see the action description for why this defaults to true"
+    required: false
+    default: "true"
+  sarif-file:
+    description: "Filename for the SARIF output"
+    required: false
+    default: "checkov-plan-results.sarif"
+
+outputs:
+  sarif-file:
+    description: "Path to the generated SARIF report"
+    value: ${{ steps.scan.outputs.sarif-file }}
+  exitcode:
+    description: "Exit code checkov returned (0 = no findings, ignored if soft-fail)"
+    value: ${{ steps.scan.outputs.exitcode }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Install checkov
+      shell: bash
+      run: pip install --quiet "checkov==${{ inputs.checkov-version }}"
+
+    - name: Scan the plan (enriched against HCL source)
+      id: scan
+      shell: bash
+      run: |
+        set +e
+        checkov \
+          -f "${{ inputs.plan-file }}" \
+          --repo-root-for-plan-enrichment "${{ inputs.repo-root }}" \
+          --deep-analysis \
+          -o cli -o sarif \
+          --output-file-path "console,${{ inputs.sarif-file }}" \
+          ${{ inputs.soft-fail == 'true' && '--soft-fail' || '' }}
+        exitcode=$?
+        set -e
+
+        echo "sarif-file=${{ inputs.sarif-file }}" >> "$GITHUB_OUTPUT"
+        echo "exitcode=$exitcode" >> "$GITHUB_OUTPUT"
+        exit $exitcode

@@ -1,0 +1,72 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Scan the fixture plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "~1.16"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: test
+        run: terraform init -input=false
+
+      - name: Terraform plan
+        working-directory: test
+        # Fake credentials - the fixture's provider block skips credential
+        # validation, so this never touches a real AWS account.
+        run: terraform plan -input=false -out=plan.tfplan
+
+      - name: Terraform show (JSON)
+        working-directory: test
+        run: terraform show -json plan.tfplan > plan.json
+
+      - name: Run the action against the fixture (soft-fail default)
+        id: scan
+        uses: ./
+        with:
+          plan-file: test/plan.json
+          repo-root: test
+
+      - name: Assert the SARIF file was produced and the step didn't fail (soft-fail)
+        run: |
+          test -s "${{ steps.scan.outputs.sarif-file }}"
+          echo "exitcode output: ${{ steps.scan.outputs.exitcode }}"
+          python3 -c "
+          import json
+          with open('${{ steps.scan.outputs.sarif-file }}') as f:
+              data = json.load(f)
+          results = data['runs'][0]['results']
+          print('OK -', len(results), 'result(s) in the SARIF report')
+          "
+
+      - name: Run the action with soft-fail disabled - must fail (the fixture has real findings)
+        id: scan_hard
+        continue-on-error: true
+        uses: ./
+        with:
+          plan-file: test/plan.json
+          repo-root: test
+          soft-fail: "false"
+          sarif-file: checkov-plan-results-hard.sarif
+
+      - name: Assert the hard-fail run actually failed
+        run: |
+          if [ "${{ steps.scan_hard.outcome }}" != "failure" ]; then
+            echo "expected the hard-fail run to fail (fixture has real findings), but it didn't"
+            exit 1
+          fi
+          echo "OK - hard-fail run failed as expected"
