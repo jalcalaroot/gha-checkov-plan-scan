@@ -32,6 +32,28 @@ Inside an existing `terraform plan` job, right after producing the plan JSON (th
 
 The SARIF report is written locally (`checkov-plan-results.sarif` by default) — upload it to the Security tab yourself if wanted, same as the existing HCL Checkov step does, since this action doesn't assume any particular repo's permissions for that.
 
+### Custom checks that need a resolved plan
+
+Some custom checks (e.g. [`johan-cloud-policies`](https://github.com/jalcalaroot/johan-cloud-policies)'s `custom_policies/plan_only/`) are specifically written to read a resource attribute that only resolves to its real value against a plan, never against static HCL — pass their directory via `external-checks-dir`:
+
+```yaml
+- name: Checkout custom policies
+  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  with:
+    repository: jalcalaroot/johan-cloud-policies
+    path: .johan-cloud-policies
+    ref: <pinned-sha>
+
+- name: Checkov Plan Scan
+  uses: jalcalaroot/gha-checkov-plan-scan@<pinned-sha>
+  with:
+    plan-file: plan.json
+    repo-root: .
+    external-checks-dir: .johan-cloud-policies/custom_policies/plan_only/aws # or plan_only/azure
+```
+
+A check written for static HCL scanning also still works here (if it doesn't touch a cross-resource-referenced attribute) — this is additive, not a separate check registry.
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -41,6 +63,7 @@ The SARIF report is written locally (`checkov-plan-results.sarif` by default) �
 | `checkov-version` | no | `3.3.17` | Pinned checkov version to install |
 | `soft-fail` | no | `true` | See the limitation above before setting this to `false` |
 | `sarif-file` | no | `checkov-plan-results.sarif` | Output filename for the SARIF report |
+| `external-checks-dir` | no | `""` (disabled) | Path to a directory of custom checks meant to run against the resolved plan |
 
 ## Outputs
 
@@ -68,4 +91,4 @@ Nothing about Checkov's own ruleset or config changed. What changed is the *inpu
 
 ## Test
 
-`.github/workflows/test.yml` runs this action twice against a fixture in `test/` (an `aws_s3_bucket` with several checks deliberately left un-skipped so there's something real to find, plus an `aws_iam_role`, fake credentials, `skip_credentials_validation = true` — no real AWS account involved): once with the default `soft-fail: true` (must succeed despite real findings) and once with `soft-fail: false` (must fail), asserting both behave as documented.
+`.github/workflows/test.yml` runs this action three times against a fixture in `test/` (an `aws_s3_bucket` with several checks deliberately left un-skipped so there's something real to find, plus an `aws_iam_role`, fake credentials, `skip_credentials_validation = true` — no real AWS account involved): once with the default `soft-fail: true` (must succeed despite real findings), once with `soft-fail: false` (must fail), and once with `external-checks-dir` pointed at a test-only check (`test/custom_checks/`) that always fails — asserting its ID shows up in the SARIF report only when that input is actually set, proving the flag reaches the underlying checkov invocation rather than just existing as an unused input.

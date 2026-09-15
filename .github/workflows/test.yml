@@ -70,3 +70,24 @@ jobs:
             exit 1
           fi
           echo "OK - hard-fail run failed as expected"
+
+      - name: Run the action with external-checks-dir set
+        id: scan_custom
+        uses: ./
+        with:
+          plan-file: test/plan.json
+          repo-root: test
+          external-checks-dir: test/custom_checks
+          sarif-file: checkov-plan-results-custom.sarif
+
+      - name: Assert the custom check ID shows up only when external-checks-dir is set
+        run: |
+          if ! grep -q "CKV2_CUSTOM_TEST_1" "${{ steps.scan_custom.outputs.sarif-file }}"; then
+            echo "expected CKV2_CUSTOM_TEST_1 in the SARIF report when external-checks-dir is set, but it's missing"
+            exit 1
+          fi
+          if grep -q "CKV2_CUSTOM_TEST_1" "${{ steps.scan.outputs.sarif-file }}"; then
+            echo "CKV2_CUSTOM_TEST_1 showed up even without external-checks-dir set - the default should be a no-op"
+            exit 1
+          fi
+          echo "OK - external-checks-dir is actually wired through to the checkov invocation"
