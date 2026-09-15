@@ -33,6 +33,16 @@ inputs:
     description: "Filename for the SARIF output"
     required: false
     default: "checkov-plan-results.sarif"
+  external-checks-dir:
+    description: >
+      Optional path to a directory of custom Checkov checks (e.g. a checked-out
+      johan-cloud-policies/custom_policies/plan_only/<provider>). Only checks
+      designed to read a RESOLVED plan value belong here - a check written for
+      static HCL scanning either still works (if it doesn't touch a
+      cross-resource-referenced attribute) or silently never fires, same as
+      pointing this input at nothing.
+    required: false
+    default: ""
 
 outputs:
   sarif-file:
@@ -65,7 +75,8 @@ runs:
           --deep-analysis \
           -o cli -o sarif \
           --output-file-path "console,${{ inputs.sarif-file }}" \
-          ${{ inputs.soft-fail == 'true' && '--soft-fail' || '' }}
+          ${{ inputs.soft-fail == 'true' && '--soft-fail' || '' }} \
+          ${{ inputs.external-checks-dir != '' && format('--external-checks-dir {0}', inputs.external-checks-dir) || '' }}
         exitcode=$?
         set -e
 
